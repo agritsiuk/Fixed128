@@ -7,13 +7,13 @@
 // where `mantissa` is a signed 128-bit integer and `exponent` is an int8_t
 // giving the number of decimal places.
 //
-// The template parameter MaxPrecision is REQUIRED and caps the *automatic*
-// target exponent derived by operator* and operator/. If the natural
-// exponent exceeds MaxPrecision, the mantissa is truncated toward zero to
-// bring it down.
+// The template parameter MaxPrecision is REQUIRED and:
+//   - operator* caps its natural exponent (ea + eb) at MaxPrecision;
+//   - operator/ ALWAYS uses MaxPrecision as target exponent, meaning both
+//     operands are effectively rescaled to MaxPrecision before dividing.
 //
 // Operations that take an explicit target (rescale, divide_at) and the
-// additive operators (+ and -) do NOT apply the cap: those represent
+// additive operators (+ and -) do NOT use MaxPrecision: those represent
 // user-intent operations rather than derived-precision ones.
 // =============================================================================
 
@@ -49,8 +49,6 @@ public:
     int8_t   exponent;
 
     // Public constructor: int64_t mantissa + int8_t exponent.
-    // User-provided inputs are kept in a range that fits inside __int128
-    // for standard one-step operations.
     Fixed128(int64_t source_mantissa, int8_t source_exponent) noexcept
         : mantissa(static_cast<__int128>(source_mantissa))
         , exponent(source_exponent) {}
@@ -58,9 +56,7 @@ public:
     // -------------------------------------------------------------------------
     // ADDITION
     //
-    // Common denominator = max(ea, eb). The less precise operand is scaled up
-    // to the more precise one, which preserves maximum information.
-    // No MaxPrecision cap: addition is a user-intent operation.
+    // Common denominator = max(ea, eb). No MaxPrecision cap.
     // -------------------------------------------------------------------------
     Fixed128 operator+(const Fixed128& right_operand) const {
         int8_t common_exponent = std::max(exponent, right_operand.exponent);
@@ -79,7 +75,7 @@ public:
     // -------------------------------------------------------------------------
     // SUBTRACTION
     //
-    // Same common-denominator rule as addition.
+    // Same common-denominator rule as addition. No MaxPrecision cap.
     // -------------------------------------------------------------------------
     Fixed128 operator-(const Fixed128& right_operand) const {
         int8_t common_exponent = std::max(exponent, right_operand.exponent);
@@ -102,11 +98,11 @@ public:
     // If natural > MaxPrecision, cap and truncate toward zero.
     //
     // LIMITATION (phantom overflow): the raw product is computed before the
-    // cap is applied. For int64_t-mantissa inputs (|m| < 2^63) this is safe
-    // because |ma*mb| < 2^126. For chained "*" on already-scaled values
-    // whose mantissas approach INT128_MAX, the raw product may overflow
-    // even though the capped result would fit; then std::overflow_error
-    // is thrown rather than producing a wrong answer.
+    // cap. For int64_t-mantissa inputs (|m| < 2^63) this is safe because
+    // |ma*mb| < 2^126. For chained "*" on already-scaled values whose
+    // mantissas approach INT128_MAX, the raw product may overflow even
+    // though the capped result would fit; then std::overflow_error is
+    // thrown rather than producing a wrong answer.
     // -------------------------------------------------------------------------
     Fixed128 operator*(const Fixed128& right_operand) const {
         int natural_exponent = static_cast<int>(exponent)
@@ -142,31 +138,40 @@ public:
     // -------------------------------------------------------------------------
     // DIVISION
     //
-    // Natural target = max(ea, eb). Division never adds significant digits,
-    // so we adopt the precision of the better operand — this matches the
-    // additive operators and preserves "accuracy = accuracy of best input".
-    // If natural > MaxPrecision, cap and adjust the scaling shift accordingly.
+    // Target exponent is ALWAYS MaxPrecision, regardless of input
+    // exponents. Both operands are effectively rescaled to MaxPrecision
+    // before division:
+    //
+    //     a/b = (ma / 10^ea) / (mb / 10^eb)
+    //     result.mantissa = ma * 10^(MaxPrecision - ea + eb) / mb
+    //     result.exponent = MaxPrecision
+    //
+    // Consequence: result.exponent == MaxPrecision always. This makes
+    // pipelines uniform — every divided value lands on the same scale.
+    //
+    // NOTE: pick MaxPrecision carefully. Division with large MaxPrecision
+    // multiplies the numerator by 10^shift; for very large MaxPrecision
+    // (e.g. 127) the shift exceeds what fits in __int128 and overflow is
+    // reported. For typical financial data, MaxPrecision in the 2-18 range
+    // is safe. Use divide_at(divisor, target) when a different target is
+    // needed.
     // -------------------------------------------------------------------------
     Fixed128 operator/(const Fixed128& divisor) const {
         if (divisor.mantissa == 0) {
             throw std::domain_error(
                 "Fixed128::operator/: division by zero");
         }
-        int natural_target = std::max(static_cast<int>(exponent),
-                                      static_cast<int>(divisor.exponent));
-        int capped_target  = std::min(natural_target,
-                                      static_cast<int>(MaxPrecision));
-        int scaling_shift  = capped_target
-                           - static_cast<int>(exponent)
-                           + static_cast<int>(divisor.exponent);
+        int scaling_shift = static_cast<int>(MaxPrecision)
+                          - static_cast<int>(exponent)
+                          + static_cast<int>(divisor.exponent);
         return divide_scaled(mantissa, divisor.mantissa, scaling_shift,
-                             static_cast<int8_t>(capped_target));
+                             MaxPrecision);
     }
 
     // -------------------------------------------------------------------------
     // EXPLICIT-TARGET DIVISION
     //
-    // The target is fully user-controlled and is NOT capped by MaxPrecision.
+    // The target is user-controlled and does NOT interact with MaxPrecision.
     // -------------------------------------------------------------------------
     Fixed128 divide_at(const Fixed128& divisor, int8_t target_exponent) const {
         if (divisor.mantissa == 0) {
@@ -197,7 +202,7 @@ public:
     // -------------------------------------------------------------------------
     // RESCALE
     //
-    // Upscaling (target > exponent) is exact: multiply mantissa by 10^diff.
+    // Upscaling is exact: multiply mantissa by 10^diff.
     // Downscaling applies `mode` (default: Truncate).
     // -------------------------------------------------------------------------
     Fixed128 rescale(int8_t target_exponent,
@@ -246,10 +251,8 @@ public:
     //
     // Strips trailing zeros from the mantissa, reducing the exponent down
     // to (but not below) zero. Zero is canonicalized to (0, 0).
-    //
-    // Negative exponents are left untouched: this operation targets the
-    // financial fixed-point case where exponent >= 0. If you need to
-    // canonicalize negative exponents, do so manually.
+    // Negative exponents are left untouched (financial use case assumes
+    // exponent >= 0).
     // -------------------------------------------------------------------------
     Fixed128 normalize() const {
         if (mantissa == 0) return from_raw(0, 0);
@@ -265,10 +268,8 @@ public:
     // -------------------------------------------------------------------------
     // STRING CONVERSION
     //
-    // Only exponent >= 0 is supported (financial use case).
-    // Output includes exactly `exponent` digits after the decimal point.
-    //
-    // Absolute value is computed via unsigned __int128 to avoid UB for
+    // Supports only exponent >= 0 (financial use case).
+    // Absolute value computed via unsigned __int128 to avoid UB for
     // mantissa == INT128_MIN.
     // -------------------------------------------------------------------------
     std::string to_string() const {
@@ -278,12 +279,6 @@ public:
         }
 
         bool is_negative = mantissa < 0;
-
-        // |mantissa| without UB.
-        // For negative mantissa:
-        //     static_cast<unsigned __int128>(m) = 2^128 - |m|
-        //     0 - (2^128 - |m|) = |m|  (mod 2^128)
-        // For INT128_MIN: |INT128_MIN| = 2^127, still fits in unsigned __int128.
         unsigned __int128 magnitude;
         if (is_negative) {
             magnitude = 0 - static_cast<unsigned __int128>(mantissa);
@@ -332,7 +327,6 @@ private:
         return Fixed128(raw_mantissa, raw_exponent, RawTag::Tag);
     }
 
-    // 10^power for power in [0, kMaxPower10].
     static __int128 pow10(int power) {
         if (power < 0 || power > kMaxPower10) {
             throw std::overflow_error(
@@ -343,10 +337,6 @@ private:
         return result;
     }
 
-    // -------------------------------------------------------------------------
-    // Divide `dividend` by a positive `divisor`, applying the specified mode.
-    // Caller guarantees divisor > 0.
-    // -------------------------------------------------------------------------
     static __int128 rounded_divide(__int128 dividend,
                                    __int128 positive_divisor,
                                    RoundingMode mode) {
@@ -365,7 +355,7 @@ private:
             : static_cast<unsigned __int128>(remainder);
         unsigned __int128 divisor_u =
             static_cast<unsigned __int128>(positive_divisor);
-        unsigned __int128 twice_remainder = abs_remainder * 2;  // < 2^128
+        unsigned __int128 twice_remainder = abs_remainder * 2;
 
         switch (mode) {
         case RoundingMode::Truncate:
@@ -386,46 +376,31 @@ private:
             if (twice_remainder > divisor_u)
                 return value_negative ? quotient - 1 : quotient + 1;
             if (twice_remainder < divisor_u) return quotient;
-            // Exact tie: round to even.
             if (quotient % 2 == 0) return quotient;
             return value_negative ? quotient - 1 : quotient + 1;
         case RoundingMode::HalfFloor:
             if (twice_remainder > divisor_u)
                 return value_negative ? quotient - 1 : quotient + 1;
             if (twice_remainder < divisor_u) return quotient;
-            // Exact tie: toward -inf.
             return value_negative ? quotient - 1 : quotient;
         case RoundingMode::HalfCeiling:
             if (twice_remainder > divisor_u)
                 return value_negative ? quotient - 1 : quotient + 1;
             if (twice_remainder < divisor_u) return quotient;
-            // Exact tie: toward +inf.
             return value_negative ? quotient : quotient + 1;
         }
         throw std::logic_error(
             "Fixed128::rounded_divide: unknown rounding mode");
     }
 
-    // -------------------------------------------------------------------------
-    // R/10^result_exponent = (numerator * 10^scaling_shift) / denominator
-    //
-    // Computed via divmod:
-    //     q, rem = divmod(numerator, denominator)
-    //     R = q * 10^shift + trunc(rem * 10^shift / denominator)
-    //
-    // This avoids overflow of `numerator * 10^scaling_shift` for typical
-    // int64_t-mantissa inputs.
-    // -------------------------------------------------------------------------
     static Fixed128 divide_scaled(__int128 numerator, __int128 denominator,
                                   int scaling_shift,
                                   int8_t result_exponent) {
-        // Guard against UB: INT128_MIN / -1.
         if (denominator == -1 && numerator == int128_minimum()) {
             throw std::overflow_error(
                 "Fixed128::divide_scaled: INT128_MIN / -1");
         }
 
-        // Negative shift: divide both mantissas by 10^|shift| via the divisor.
         if (scaling_shift < 0) {
             int down_shift = -scaling_shift;
             if (down_shift > kMaxPower10) {
@@ -477,18 +452,15 @@ private:
         return from_raw(result_mantissa, result_exponent);
     }
 
-    // -------------------------------------------------------------------------
     // trunc(remainder * 10^shift / divisor).
     //
     // Fast path: direct multiplication if it fits.
-    // Slow path: step-by-step long division (truncation toward zero matches
-    // C++ integer division even for mixed signs).
+    // Slow path: step-by-step long division (matches C++ truncation).
     //
     // LIMITATION: if |remainder| > INT128_MAX / 10 and shift > 0 and the
-    // fast path overflows, the stepwise multiplication can also overflow;
-    // then `false` is returned and the caller throws. For int64_t-mantissa
+    // fast path overflows, the stepwise path can also overflow; then
+    // `false` is returned and the caller throws. For int64_t-mantissa
     // inputs (|divisor| <= 2^63, |remainder| < 2^63) this never happens.
-    // -------------------------------------------------------------------------
     static bool compute_fraction(__int128 remainder, int shift,
                                  __int128 divisor, __int128* out_fraction) {
         __int128 scaled_remainder;
@@ -518,7 +490,6 @@ private:
         return true;
     }
 
-    // Minimum value of __int128 (-2^127) without UB.
     static __int128 int128_minimum() {
         const __int128 half = static_cast<__int128>(1) << 126;
         return -half - half;

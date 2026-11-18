@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(fixed128 VERSION 1.2.0 LANGUAGES CXX)
+project(fixed128 VERSION 1.3.0 LANGUAGES CXX)
 
 # Header-only INTERFACE library
 add_library(fixed128 INTERFACE)
