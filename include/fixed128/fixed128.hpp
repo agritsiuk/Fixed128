@@ -1,20 +1,21 @@
 #pragma once
 // =============================================================================
-// fixed128: header-only fixed-point arithmetic on top of __int128.
+// Fixed128: header-only fixed-point arithmetic.
+//
+// Backend is selected automatically:
+//   - native __int128 on GCC / Clang (no Boost dependency)
+//   - Boost.Multiprecision on MSVC (header-only, no linking)
+//   - FIXED128_FORCE_BOOST_BACKEND forces the Boost backend even on GCC/Clang
 //
 // Value representation:
 //     value = mantissa / 10^exponent
-// where `mantissa` is a signed 128-bit integer and `exponent` is an int8_t
-// giving the number of decimal places.
 //
-// The template parameter MaxPrecision is REQUIRED and:
-//   - operator* caps its natural exponent (ea + eb) at MaxPrecision;
-//   - operator/ ALWAYS uses MaxPrecision as target exponent, meaning both
-//     operands are effectively rescaled to MaxPrecision before dividing.
+// MaxPrecision (mandatory NTTP):
+//   - operator* caps natural exponent (ea + eb) at MaxPrecision;
+//   - operator/ always uses MaxPrecision as target exponent.
 //
-// Operations that take an explicit target (rescale, divide_at) and the
-// additive operators (+ and -) do NOT use MaxPrecision: those represent
-// user-intent operations rather than derived-precision ones.
+// Explicit operations (rescale, divide_at) and additive operators (+/-)
+// do NOT use MaxPrecision.
 // =============================================================================
 
 #include <algorithm>
@@ -23,18 +24,25 @@
 #include <stdexcept>
 #include <string>
 
+#if defined(FIXED128_FORCE_BOOST_BACKEND)
+    #include "detail/backend_msvc.hpp"
+#elif defined(__SIZEOF_INT128__)
+    #include "detail/backend_gcc.hpp"
+#elif defined(_MSC_VER)
+    #include "detail/backend_msvc.hpp"
+#else
+    #error "fixed128: unsupported compiler (need __int128 or MSVC)"
+#endif
+
 namespace fixed128 {
+
+using detail::int128_t;
+using detail::uint128_t;
 
 // Rounding modes for rescaling to a lower exponent.
 enum class RoundingMode {
-    Truncate,     // toward zero
-    Floor,        // toward -inf
-    Ceiling,      // toward +inf
-    HalfUp,       // ties away from zero (like std::round)
-    HalfDown,     // ties toward zero
-    HalfEven,     // bankers' rounding (ties to even)
-    HalfFloor,    // ties toward -inf
-    HalfCeiling,  // ties toward +inf
+    Truncate, Floor, Ceiling,
+    HalfUp, HalfDown, HalfEven, HalfFloor, HalfCeiling,
 };
 
 template <int8_t MaxPrecision>
@@ -45,16 +53,53 @@ class Fixed128 {
 public:
     static constexpr int8_t max_precision = MaxPrecision;
 
-    __int128 mantissa;
+    int128_t mantissa;
     int8_t   exponent;
 
     // Public constructor: int64_t mantissa + int8_t exponent.
     Fixed128(int64_t source_mantissa, int8_t source_exponent) noexcept
-        : mantissa(static_cast<__int128>(source_mantissa))
+        : mantissa(source_mantissa)
         , exponent(source_exponent) {}
 
     // -------------------------------------------------------------------------
-    // ADDITION
+    // UNARY OPERATORS
+    // -------------------------------------------------------------------------
+
+    Fixed128 operator-() const {
+        return from_raw(detail::checked_neg(mantissa), exponent);
+    }
+
+    Fixed128 operator+() const {
+        return *this;
+    }
+
+    // -------------------------------------------------------------------------
+    // INCREMENT / DECREMENT
+    //
+    // ++x adds 1.0 (value = 1 at exponent 0). Result exponent becomes
+    // max(exponent, 0), matching the addition rule.
+    // -------------------------------------------------------------------------
+    Fixed128& operator++() {
+        *this = *this + Fixed128(1, 0);
+        return *this;
+    }
+    Fixed128& operator--() {
+        *this = *this - Fixed128(1, 0);
+        return *this;
+    }
+    Fixed128 operator++(int) {
+        Fixed128 previous = *this;
+        ++(*this);
+        return previous;
+    }
+    Fixed128 operator--(int) {
+        Fixed128 previous = *this;
+        --(*this);
+        return previous;
+    }
+
+    // -------------------------------------------------------------------------
+    // ADDITION / SUBTRACTION
     //
     // Common denominator = max(ea, eb). No MaxPrecision cap.
     // -------------------------------------------------------------------------
@@ -63,46 +108,25 @@ public:
         Fixed128 left_scaled  = rescale(common_exponent);
         Fixed128 right_scaled = right_operand.rescale(common_exponent);
 
-        __int128 sum_mantissa;
-        if (__builtin_add_overflow(left_scaled.mantissa,
-                                   right_scaled.mantissa, &sum_mantissa)) {
-            throw std::overflow_error(
-                "Fixed128::operator+: mantissa overflow");
-        }
+        int128_t sum_mantissa =
+            detail::checked_add(left_scaled.mantissa, right_scaled.mantissa);
         return from_raw(sum_mantissa, common_exponent);
     }
 
-    // -------------------------------------------------------------------------
-    // SUBTRACTION
-    //
-    // Same common-denominator rule as addition. No MaxPrecision cap.
-    // -------------------------------------------------------------------------
     Fixed128 operator-(const Fixed128& right_operand) const {
         int8_t common_exponent = std::max(exponent, right_operand.exponent);
         Fixed128 left_scaled  = rescale(common_exponent);
         Fixed128 right_scaled = right_operand.rescale(common_exponent);
 
-        __int128 diff_mantissa;
-        if (__builtin_sub_overflow(left_scaled.mantissa,
-                                   right_scaled.mantissa, &diff_mantissa)) {
-            throw std::overflow_error(
-                "Fixed128::operator-: mantissa overflow");
-        }
+        int128_t diff_mantissa =
+            detail::checked_sub(left_scaled.mantissa, right_scaled.mantissa);
         return from_raw(diff_mantissa, common_exponent);
     }
 
     // -------------------------------------------------------------------------
     // MULTIPLICATION
     //
-    // Natural target = ea + eb (mantissa product is exact).
-    // If natural > MaxPrecision, cap and truncate toward zero.
-    //
-    // LIMITATION (phantom overflow): the raw product is computed before the
-    // cap. For int64_t-mantissa inputs (|m| < 2^63) this is safe because
-    // |ma*mb| < 2^126. For chained "*" on already-scaled values whose
-    // mantissas approach INT128_MAX, the raw product may overflow even
-    // though the capped result would fit; then std::overflow_error is
-    // thrown rather than producing a wrong answer.
+    // Natural target = ea + eb; capped at MaxPrecision (truncation toward zero).
     // -------------------------------------------------------------------------
     Fixed128 operator*(const Fixed128& right_operand) const {
         int natural_exponent = static_cast<int>(exponent)
@@ -110,18 +134,13 @@ public:
         int capped_exponent  = std::min(natural_exponent,
                                         static_cast<int>(MaxPrecision));
 
-        // Guard: natural can be as low as -256. int8_t cannot represent that.
         if (capped_exponent < -128) {
             throw std::overflow_error(
                 "Fixed128::operator*: result exponent below int8_t range");
         }
 
-        __int128 product_mantissa;
-        if (__builtin_mul_overflow(mantissa, right_operand.mantissa,
-                                   &product_mantissa)) {
-            throw std::overflow_error(
-                "Fixed128::operator*: mantissa overflow");
-        }
+        int128_t product_mantissa =
+            detail::checked_mul(mantissa, right_operand.mantissa);
 
         if (capped_exponent < natural_exponent) {
             int down_shift = natural_exponent - capped_exponent;
@@ -129,7 +148,7 @@ public:
                 throw std::overflow_error(
                     "Fixed128::operator*: truncation shift too large");
             }
-            product_mantissa /= pow10(down_shift);
+            product_mantissa /= detail::pow10(down_shift);
         }
         return from_raw(product_mantissa,
                         static_cast<int8_t>(capped_exponent));
@@ -138,23 +157,7 @@ public:
     // -------------------------------------------------------------------------
     // DIVISION
     //
-    // Target exponent is ALWAYS MaxPrecision, regardless of input
-    // exponents. Both operands are effectively rescaled to MaxPrecision
-    // before division:
-    //
-    //     a/b = (ma / 10^ea) / (mb / 10^eb)
-    //     result.mantissa = ma * 10^(MaxPrecision - ea + eb) / mb
-    //     result.exponent = MaxPrecision
-    //
-    // Consequence: result.exponent == MaxPrecision always. This makes
-    // pipelines uniform — every divided value lands on the same scale.
-    //
-    // NOTE: pick MaxPrecision carefully. Division with large MaxPrecision
-    // multiplies the numerator by 10^shift; for very large MaxPrecision
-    // (e.g. 127) the shift exceeds what fits in __int128 and overflow is
-    // reported. For typical financial data, MaxPrecision in the 2-18 range
-    // is safe. Use divide_at(divisor, target) when a different target is
-    // needed.
+    // Target exponent is ALWAYS MaxPrecision.
     // -------------------------------------------------------------------------
     Fixed128 operator/(const Fixed128& divisor) const {
         if (divisor.mantissa == 0) {
@@ -168,11 +171,6 @@ public:
                              MaxPrecision);
     }
 
-    // -------------------------------------------------------------------------
-    // EXPLICIT-TARGET DIVISION
-    //
-    // The target is user-controlled and does NOT interact with MaxPrecision.
-    // -------------------------------------------------------------------------
     Fixed128 divide_at(const Fixed128& divisor, int8_t target_exponent) const {
         if (divisor.mantissa == 0) {
             throw std::domain_error(
@@ -185,25 +183,46 @@ public:
                              target_exponent);
     }
 
-    // Compound assignment operators delegate to the binary forms.
-    Fixed128& operator+=(const Fixed128& right_operand) {
-        *this = *this + right_operand; return *this;
+    // -------------------------------------------------------------------------
+    // COMPARISON
+    //
+    // Compares real values, not (mantissa, exponent) pairs. Cross-exponent
+    // comparison is delegated to the backend (arbitrary precision or
+    // overflow-detecting __int128).
+    // -------------------------------------------------------------------------
+    friend bool operator==(const Fixed128& a, const Fixed128& b) {
+        return detail::compare_cross(a.mantissa, a.exponent,
+                                     b.mantissa, b.exponent) == 0;
     }
-    Fixed128& operator-=(const Fixed128& right_operand) {
-        *this = *this - right_operand; return *this;
+    friend bool operator!=(const Fixed128& a, const Fixed128& b) {
+        return detail::compare_cross(a.mantissa, a.exponent,
+                                     b.mantissa, b.exponent) != 0;
     }
-    Fixed128& operator*=(const Fixed128& right_operand) {
-        *this = *this * right_operand; return *this;
+    friend bool operator< (const Fixed128& a, const Fixed128& b) {
+        return detail::compare_cross(a.mantissa, a.exponent,
+                                     b.mantissa, b.exponent) <  0;
     }
-    Fixed128& operator/=(const Fixed128& right_operand) {
-        *this = *this / right_operand; return *this;
+    friend bool operator<=(const Fixed128& a, const Fixed128& b) {
+        return detail::compare_cross(a.mantissa, a.exponent,
+                                     b.mantissa, b.exponent) <= 0;
     }
+    friend bool operator> (const Fixed128& a, const Fixed128& b) {
+        return detail::compare_cross(a.mantissa, a.exponent,
+                                     b.mantissa, b.exponent) >  0;
+    }
+    friend bool operator>=(const Fixed128& a, const Fixed128& b) {
+        return detail::compare_cross(a.mantissa, a.exponent,
+                                     b.mantissa, b.exponent) >= 0;
+    }
+
+    // Compound assignment.
+    Fixed128& operator+=(const Fixed128& r) { *this = *this + r; return *this; }
+    Fixed128& operator-=(const Fixed128& r) { *this = *this - r; return *this; }
+    Fixed128& operator*=(const Fixed128& r) { *this = *this * r; return *this; }
+    Fixed128& operator/=(const Fixed128& r) { *this = *this / r; return *this; }
 
     // -------------------------------------------------------------------------
     // RESCALE
-    //
-    // Upscaling is exact: multiply mantissa by 10^diff.
-    // Downscaling applies `mode` (default: Truncate).
     // -------------------------------------------------------------------------
     Fixed128 rescale(int8_t target_exponent,
                      RoundingMode mode = RoundingMode::Truncate) const {
@@ -216,12 +235,8 @@ public:
                 throw std::overflow_error(
                     "Fixed128::rescale: upshift too large");
             }
-            __int128 scaled_mantissa;
-            if (__builtin_mul_overflow(mantissa, pow10(up_shift),
-                                       &scaled_mantissa)) {
-                throw std::overflow_error(
-                    "Fixed128::rescale: mantissa overflow");
-            }
+            int128_t scaled_mantissa =
+                detail::checked_mul(mantissa, detail::pow10(up_shift));
             return from_raw(scaled_mantissa, target_exponent);
         }
 
@@ -231,11 +246,11 @@ public:
             throw std::overflow_error(
                 "Fixed128::rescale: downshift too large");
         }
-        __int128 result = rounded_divide(mantissa, pow10(down_shift), mode);
+        int128_t result = rounded_divide(mantissa,
+                                         detail::pow10(down_shift), mode);
         return from_raw(result, target_exponent);
     }
 
-    // Convenience wrappers.
     Fixed128 round(int8_t target_exponent, RoundingMode mode) const {
         return rescale(target_exponent, mode);
     }
@@ -248,15 +263,10 @@ public:
 
     // -------------------------------------------------------------------------
     // NORMALIZE
-    //
-    // Strips trailing zeros from the mantissa, reducing the exponent down
-    // to (but not below) zero. Zero is canonicalized to (0, 0).
-    // Negative exponents are left untouched (financial use case assumes
-    // exponent >= 0).
     // -------------------------------------------------------------------------
     Fixed128 normalize() const {
         if (mantissa == 0) return from_raw(0, 0);
-        __int128 reduced_mantissa = mantissa;
+        int128_t reduced_mantissa = mantissa;
         int8_t   reduced_exponent = exponent;
         while (reduced_exponent > 0 && reduced_mantissa % 10 == 0) {
             reduced_mantissa /= 10;
@@ -267,10 +277,6 @@ public:
 
     // -------------------------------------------------------------------------
     // STRING CONVERSION
-    //
-    // Supports only exponent >= 0 (financial use case).
-    // Absolute value computed via unsigned __int128 to avoid UB for
-    // mantissa == INT128_MIN.
     // -------------------------------------------------------------------------
     std::string to_string() const {
         if (exponent < 0) {
@@ -279,12 +285,7 @@ public:
         }
 
         bool is_negative = mantissa < 0;
-        unsigned __int128 magnitude;
-        if (is_negative) {
-            magnitude = 0 - static_cast<unsigned __int128>(mantissa);
-        } else {
-            magnitude = static_cast<unsigned __int128>(mantissa);
-        }
+        uint128_t magnitude = detail::unsigned_magnitude(mantissa);
 
         std::string digits;
         if (magnitude == 0) {
@@ -312,91 +313,85 @@ public:
     }
 
 private:
-    // Largest power of 10 that fits in __int128 (10^38 < INT128_MAX).
-    static constexpr int kMaxPower10 = 38;
+    static constexpr int kMaxPower10 = detail::kMaxPower10;
 
-    // Internal tag: allows constructing Fixed128 from __int128 without
-    // going through the public int64_t-typed constructor.
     enum class RawTag { Tag };
 
-    Fixed128(__int128 raw_mantissa, int8_t raw_exponent, RawTag) noexcept
+    Fixed128(int128_t raw_mantissa, int8_t raw_exponent, RawTag) noexcept
         : mantissa(raw_mantissa), exponent(raw_exponent) {}
 
-    static Fixed128 from_raw(__int128 raw_mantissa,
+    static Fixed128 from_raw(int128_t raw_mantissa,
                              int8_t raw_exponent) noexcept {
         return Fixed128(raw_mantissa, raw_exponent, RawTag::Tag);
     }
 
-    static __int128 pow10(int power) {
-        if (power < 0 || power > kMaxPower10) {
-            throw std::overflow_error(
-                "Fixed128::pow10: exponent out of range");
-        }
-        __int128 result = 1;
-        for (int i = 0; i < power; ++i) result *= 10;
-        return result;
-    }
-
-    static __int128 rounded_divide(__int128 dividend,
-                                   __int128 positive_divisor,
+    static int128_t rounded_divide(int128_t dividend,
+                                   int128_t positive_divisor,
                                    RoundingMode mode) {
         if (positive_divisor <= 0) {
             throw std::invalid_argument(
                 "Fixed128::rounded_divide: divisor must be positive");
         }
 
-        __int128 quotient  = dividend / positive_divisor;
-        __int128 remainder = dividend % positive_divisor;
+        int128_t quotient  = dividend / positive_divisor;
+        int128_t remainder = dividend % positive_divisor;
         if (remainder == 0) return quotient;
 
         bool value_negative = dividend < 0;
-        unsigned __int128 abs_remainder = value_negative
-            ? static_cast<unsigned __int128>(-remainder)
-            : static_cast<unsigned __int128>(remainder);
-        unsigned __int128 divisor_u =
-            static_cast<unsigned __int128>(positive_divisor);
-        unsigned __int128 twice_remainder = abs_remainder * 2;
+        uint128_t abs_remainder = detail::unsigned_magnitude(remainder);
+        uint128_t divisor_u = static_cast<uint128_t>(positive_divisor);
+        uint128_t twice_remainder = abs_remainder * 2;
 
         switch (mode) {
         case RoundingMode::Truncate:
             return quotient;
         case RoundingMode::Floor:
-            return value_negative ? quotient - 1 : quotient;
+            return value_negative
+                ? detail::checked_sub(quotient, 1) : quotient;
         case RoundingMode::Ceiling:
-            return value_negative ? quotient : quotient + 1;
+            return value_negative
+                ? quotient : detail::checked_add(quotient, 1);
         case RoundingMode::HalfUp:
             if (twice_remainder >= divisor_u)
-                return value_negative ? quotient - 1 : quotient + 1;
+                return value_negative ? detail::checked_sub(quotient, 1)
+                                      : detail::checked_add(quotient, 1);
             return quotient;
         case RoundingMode::HalfDown:
             if (twice_remainder > divisor_u)
-                return value_negative ? quotient - 1 : quotient + 1;
+                return value_negative ? detail::checked_sub(quotient, 1)
+                                      : detail::checked_add(quotient, 1);
             return quotient;
         case RoundingMode::HalfEven:
             if (twice_remainder > divisor_u)
-                return value_negative ? quotient - 1 : quotient + 1;
+                return value_negative ? detail::checked_sub(quotient, 1)
+                                      : detail::checked_add(quotient, 1);
             if (twice_remainder < divisor_u) return quotient;
             if (quotient % 2 == 0) return quotient;
-            return value_negative ? quotient - 1 : quotient + 1;
+            return value_negative ? detail::checked_sub(quotient, 1)
+                                  : detail::checked_add(quotient, 1);
         case RoundingMode::HalfFloor:
             if (twice_remainder > divisor_u)
-                return value_negative ? quotient - 1 : quotient + 1;
+                return value_negative ? detail::checked_sub(quotient, 1)
+                                      : detail::checked_add(quotient, 1);
             if (twice_remainder < divisor_u) return quotient;
-            return value_negative ? quotient - 1 : quotient;
+            return value_negative ? detail::checked_sub(quotient, 1)
+                                  : quotient;
         case RoundingMode::HalfCeiling:
             if (twice_remainder > divisor_u)
-                return value_negative ? quotient - 1 : quotient + 1;
+                return value_negative ? detail::checked_sub(quotient, 1)
+                                      : detail::checked_add(quotient, 1);
             if (twice_remainder < divisor_u) return quotient;
-            return value_negative ? quotient : quotient + 1;
+            return value_negative ? quotient
+                                  : detail::checked_add(quotient, 1);
         }
         throw std::logic_error(
             "Fixed128::rounded_divide: unknown rounding mode");
     }
 
-    static Fixed128 divide_scaled(__int128 numerator, __int128 denominator,
+    static Fixed128 divide_scaled(int128_t numerator, int128_t denominator,
                                   int scaling_shift,
                                   int8_t result_exponent) {
-        if (denominator == -1 && numerator == int128_minimum()) {
+        if (denominator == -1 && numerator == detail::int128_min()) {
             throw std::overflow_error(
                 "Fixed128::divide_scaled: INT128_MIN / -1");
         }
@@ -407,13 +402,10 @@ private:
                 throw std::overflow_error(
                     "Fixed128::divide_scaled: shift too large");
             }
-            __int128 scaled_denominator;
-            if (__builtin_mul_overflow(denominator, pow10(down_shift),
-                                       &scaled_denominator)) {
-                throw std::overflow_error(
-                    "Fixed128::divide_scaled: divisor overflow");
-            }
-            return from_raw(numerator / scaled_denominator, result_exponent);
+            int128_t scaled_denominator =
+                detail::checked_mul(denominator, detail::pow10(down_shift));
+            return from_raw(numerator / scaled_denominator,
+                            result_exponent);
         }
 
         if (scaling_shift == 0) {
@@ -425,74 +417,35 @@ private:
                 "Fixed128::divide_scaled: shift too large");
         }
 
-        __int128 integer_quotient  = numerator / denominator;
-        __int128 integer_remainder = numerator % denominator;
+        int128_t integer_quotient  = numerator / denominator;
+        int128_t integer_remainder = numerator % denominator;
 
-        __int128 scaled_quotient;
-        if (__builtin_mul_overflow(integer_quotient, pow10(scaling_shift),
-                                   &scaled_quotient)) {
-            throw std::overflow_error(
-                "Fixed128::divide_scaled: quotient overflow");
-        }
+        int128_t scaled_quotient =
+            detail::checked_mul(integer_quotient,
+                                detail::pow10(scaling_shift));
+        int128_t fractional_part =
+            compute_fraction(integer_remainder, scaling_shift, denominator);
 
-        __int128 fractional_part;
-        if (!compute_fraction(integer_remainder, scaling_shift,
-                              denominator, &fractional_part)) {
-            throw std::overflow_error(
-                "Fixed128::divide_scaled: fraction overflow");
-        }
-
-        __int128 result_mantissa;
-        if (__builtin_add_overflow(scaled_quotient, fractional_part,
-                                   &result_mantissa)) {
-            throw std::overflow_error(
-                "Fixed128::divide_scaled: result overflow");
-        }
-
+        int128_t result_mantissa =
+            detail::checked_add(scaled_quotient, fractional_part);
         return from_raw(result_mantissa, result_exponent);
     }
 
-    // trunc(remainder * 10^shift / divisor).
-    //
-    // Fast path: direct multiplication if it fits.
-    // Slow path: step-by-step long division (matches C++ truncation).
-    //
-    // LIMITATION: if |remainder| > INT128_MAX / 10 and shift > 0 and the
-    // fast path overflows, the stepwise path can also overflow; then
-    // `false` is returned and the caller throws. For int64_t-mantissa
-    // inputs (|divisor| <= 2^63, |remainder| < 2^63) this never happens.
-    static bool compute_fraction(__int128 remainder, int shift,
-                                 __int128 divisor, __int128* out_fraction) {
-        __int128 scaled_remainder;
-        if (!__builtin_mul_overflow(remainder, pow10(shift),
-                                    &scaled_remainder)) {
-            *out_fraction = scaled_remainder / divisor;
-            return true;
-        }
-
-        __int128 running_quotient  = 0;
-        __int128 running_remainder = remainder;
+    // trunc(remainder * 10^shift / divisor) via stepwise long division.
+    static int128_t compute_fraction(int128_t remainder, int shift,
+                                     int128_t divisor) {
+        int128_t running_quotient  = 0;
+        int128_t running_remainder = remainder;
         for (int step = 0; step < shift; ++step) {
-            __int128 remainder_times_ten, quotient_times_ten, new_quotient;
-            if (__builtin_mul_overflow(running_remainder,
-                                       static_cast<__int128>(10),
-                                       &remainder_times_ten)) return false;
-            if (__builtin_mul_overflow(running_quotient,
-                                       static_cast<__int128>(10),
-                                       &quotient_times_ten)) return false;
-            if (__builtin_add_overflow(quotient_times_ten,
-                                       remainder_times_ten / divisor,
-                                       &new_quotient)) return false;
-            running_quotient  = new_quotient;
+            int128_t remainder_times_ten =
+                detail::checked_mul(running_remainder, 10);
+            int128_t quotient_times_ten  =
+                detail::checked_mul(running_quotient, 10);
+            running_quotient = detail::checked_add(
+                quotient_times_ten, remainder_times_ten / divisor);
             running_remainder = remainder_times_ten % divisor;
         }
-        *out_fraction = running_quotient;
-        return true;
-    }
-
-    static __int128 int128_minimum() {
-        const __int128 half = static_cast<__int128>(1) << 126;
-        return -half - half;
+        return running_quotient;
     }
 };
 

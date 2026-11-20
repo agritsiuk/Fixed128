@@ -1,25 +1,51 @@
-# fixed128
+# Fixed128
 
-Header-only C++ fixed-point arithmetic library built on `__int128`.
+Header-only C++ fixed-point arithmetic library with **automatic backend
+selection**:
+
+- **GCC / Clang** — native `__int128`. No external dependencies.
+- **MSVC** — `boost::multiprecision::checked_int128_t` (header-only, no linking).
+
+Backend selection happens automatically in `fixed128.hpp` based on
+`__SIZEOF_INT128__`. Define `FIXED128_FORCE_BOOST_BACKEND` before including
+to force the Boost backend even on GCC/Clang (useful for cross-platform
+testing).
+
+## Project structure
+
+~~~
+Fixed128/
+    CMakeLists.txt
+    README.md
+    include/fixed128/
+        fixed128.hpp              # public API + class (backend-agnostic)
+        detail/
+            backend_gcc.hpp       # __int128 backend (no Boost)
+            backend_msvc.hpp      # Boost.Multiprecision backend (MSVC)
+    tests/
+        CMakeLists.txt
+        test_fixed128.cpp
+~~~
 
 ## Features
 
-- `Fixed128<MaxPrecision>` — `__int128` mantissa, `int8_t` exponent
-- `operator+`, `operator-` — common denominator `max(ea, eb)`, no cap
-- `operator*` — natural = `ea + eb`, capped at `MaxPrecision`
-- `operator/` — target **always** = `MaxPrecision` (inputs rescaled first)
-- `+=`, `-=`, `*=`, `/=`
+- `Fixed128<MaxPrecision>` — 128-bit mantissa, `int8_t` exponent
+- Full arithmetic: `+`, `-`, `*`, `/`, unary `-`, unary `+`
+- Compound assignment: `+=`, `-=`, `*=`, `/=`
+- Increment / decrement: `++`, `--` (pre and post)
+- Full comparison: `==`, `!=`, `<`, `<=`, `>`, `>=` (cross-exponent safe)
 - `rescale(target, mode)`, `round(target, mode)` — all rounding modes
 - `round_half_even`, `round_half_up` — convenience wrappers
-- `normalize()` — strips trailing zeros; zero canonicalized to `(0, 0)`
+- `normalize()` — strips trailing zeros
 - `divide_at(divisor, target)` — explicit target (bypasses `MaxPrecision`)
 - `to_string()`, `operator<<`
 
 ## Requirements
 
-- C++17
-- GCC >= 5.1 or Clang >= 3.8
+- C++14 or newer
 - CMake >= 3.14
+- Boost headers **only on MSVC** (header-only; no linking)
+- Google Test (fetched automatically for tests)
 
 ## Build
 
@@ -29,68 +55,58 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ~~~
 
-## Usage
+CMake detects whether `__int128` is natively available; only if not, it
+looks for Boost.
 
-`MaxPrecision` is a **mandatory** template parameter. Choose a value
-appropriate for your use case (e.g. `16` for financial data, `24` for
-high precision). Large values (approaching 127) make division overflow
-because the target scale `10^MaxPrecision` doesn't fit in `__int128`.
+## Usage
 
 ~~~cpp
 #include <fixed128/fixed128.hpp>
 using namespace fixed128;
 
-Fixed128<16> x(150000000LL, 8);   // 1.5
-Fixed128<16> y(200000000LL, 8);   // 2.0
-Fixed128<16> z(300000000LL, 8);   // 3.0
+Fixed128<16> a(150000000LL, 8);   // 1.5
+Fixed128<16> b(200000000LL, 8);   // 2.0
+Fixed128<16> c(300000000LL, 8);   // 3.0
 
-auto r = (x * y) / z;                                 // exp 16
-auto q = x / z;                                        // exp 16 (not 8!)
-auto rounded = q.rescale(2, RoundingMode::HalfEven);   // exp 2
-auto canon   = Fixed128<16>(1500, 3).normalize();      // exp 1
+auto product  = a * b;                          // exp 16
+auto quotient = (a * b) / c;                    // exp 16
+auto negative = -a;                             // -1.5
+auto scaled   = quotient.rescale(2, RoundingMode::HalfEven);
+
+if (quotient == Fixed128<16>(1LL, 0)) { /* ... */ }
+++a;                                            // a becomes 2.5
+--b;                                            // b becomes 1.0
 ~~~
 
 ## Semantics
 
 ### MaxPrecision
 
-`MaxPrecision` (mandatory NTTP) controls the exponent of derived
-operations:
+Mandatory NTTP controlling derived operations:
 
-- **`*`**: natural = `ea + eb`; capped at `MaxPrecision`. If capping
-  occurs, the mantissa is divided by `10^(natural - MaxPrecision)`
-  (truncation toward zero).
-- **`/`**: target = `MaxPrecision` **always**. Both operands are
-  effectively rescaled to `MaxPrecision` before division, so the result
-  exponent is always `MaxPrecision`, regardless of input exponents.
+- **`*`**: natural = `ea + eb`; capped at `MaxPrecision` (truncation).
+- **`/`**: target = `MaxPrecision` **always**.
 
-`+`, `-`, `rescale`, `divide_at`, and the constructor do **not** apply
-`MaxPrecision` — they are explicit operations, not derived ones.
+`+`, `-`, `rescale`, `divide_at`, unary operators, `++`, `--`, and
+comparison do **not** apply `MaxPrecision`.
 
-`divide_at(divisor, target)` provides an escape hatch: it uses `target`
-directly, bypassing `MaxPrecision` entirely.
+### Comparison
 
-### Division target
+Compares **real values** across differing exponents:
 
-Division always produces `MaxPrecision` decimal places. This means:
+~~~cpp
+Fixed128<16>(15LL, 1) == Fixed128<16>(150LL, 2);   // true: both 1.5
+Fixed128<16>(1LL, 0)  <  Fixed128<16>(15LL, 1);    // true: 1 < 1.5
+~~~
 
-- `(x * y) / z` — the numerator already carries `ea + eb` (from `*`),
-  and division lands on `MaxPrecision`. For `MaxPrecision = 16` and
-  inputs at exp 8, the result has 16 digits after the decimal.
-- `x / z` with both operands at exp 8 — result also has 16 digits.
-  Division never "adds precision" from inputs; it uses `MaxPrecision`
-  uniformly.
-- The choice of `ea`, `eb` affects only the numerator (for `*`) or the
-  internal scaling, never the final target.
+- GCC backend: uses `__builtin_mul_overflow` to detect scaling overflow;
+  falls back to sign-only reasoning when needed.
+- MSVC backend: uses `boost::multiprecision::cpp_int` (arbitrary precision).
 
-If you need a different target, use `divide_at(divisor, target)`.
+### Increment / decrement
 
-### Choosing MaxPrecision
-
-- `MaxPrecision >= int64_t inputs' exponent` — sensible (no forced downscale).
-- `MaxPrecision` in 2..18 — safe for financial data.
-- `MaxPrecision` in 19..38 — possible but more overflow risk.
-- `MaxPrecision > 38` — division almost always overflows `__int128`.
+`++x` / `--x` add / subtract **1.0**. Result exponent = `max(x.exponent, 0)`,
+matching the addition rule.
 
 ### Rounding
 
@@ -101,26 +117,17 @@ enum class RoundingMode {
 };
 ~~~
 
-- `HalfUp` — ties away from zero (like `std::round`)
-- `HalfEven` — bankers' rounding (ties to even)
-- `rescale(target, mode)` applies `mode` only on downscale
+`HalfUp` — ties away from zero. `HalfEven` — bankers' rounding.
 
 ### normalize
 
-Strips trailing zeros from the mantissa, reducing the exponent down to
-(but not below) zero. Zero is canonicalized to `(0, 0)`.
+Strips trailing zeros from the mantissa. Zero canonicalized to `(0, 0)`.
 
 ## Known limitations
 
 1. `to_string()` supports only `exponent >= 0` (financial use case).
-2. `compute_fraction` may throw `overflow_error` for mantissas
-   `> INT128_MAX / 10` with large positive scaling shift.
-3. `int128` value limit at `exponent = 16`: `|value| < 1.7e22`.
-4. `operator*` computes the raw mantissa product before applying
-   `MaxPrecision`. For int64_t-mantissa inputs (|m| < 2^63) the product
-   is < 2^126 and always fits. For chained `*` on already-scaled values
-   near `INT128_MAX`, the product may overflow and throw even if the
-   capped result would fit — a standard "phantom overflow" trade-off.
-5. `operator/` with `MaxPrecision` greater than ~19–20 risks overflow
-   because the numerator is effectively multiplied by `10^MaxPrecision`
-   (via divmod). Use `divide_at` with a smaller target if needed.
+2. `operator*` may throw `overflow_error` on chained multiplications near
+   the 128-bit limit (phantom overflow).
+3. `operator/` with `MaxPrecision` greater than ~19–20 risks overflow.
+   Use `divide_at` with a smaller target if needed.
+4. Unary `-` on the minimum 128-bit value throws `overflow_error`.

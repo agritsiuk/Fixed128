@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(fixed128 VERSION 1.3.0 LANGUAGES CXX)
+project(Fixed128 VERSION 1.6.0 LANGUAGES CXX)
 
 # Header-only INTERFACE library
 add_library(fixed128 INTERFACE)
@@ -7,10 +7,27 @@ target_include_directories(fixed128 INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_compile_features(fixed128 INTERFACE cxx_std_17)
+target_compile_features(fixed128 INTERFACE cxx_std_14)
+
+# Detect whether the compiler has native __int128. If not (MSVC), we need
+# Boost.Multiprecision headers for the MSVC backend.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
+    int main() {
+        __int128 x = 0;
+        __int128 y = x + x;
+        (void)y;
+        return 0;
+    }
+" FIXED128_HAS_NATIVE_INT128)
+
+if(NOT FIXED128_HAS_NATIVE_INT128)
+    find_package(Boost REQUIRED)
+    target_include_directories(fixed128 INTERFACE ${Boost_INCLUDE_DIRS})
+endif()
 
 # Tests
-option(FIXED128_BUILD_TESTS "Build fixed128 tests" ON)
+option(FIXED128_BUILD_TESTS "Build Fixed128 tests" ON)
 if(FIXED128_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
