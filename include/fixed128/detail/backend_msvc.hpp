@@ -17,7 +17,7 @@
 namespace fixed128 {
 namespace detail {
 
-using int128_t  = boost::multiprecision::checked_int128_t;
+using int128_t = boost::multiprecision::checked_int128_t;
 using uint128_t = boost::multiprecision::checked_uint128_t;
 
 constexpr int kMaxPower10 = 38;
@@ -32,30 +32,55 @@ inline int128_t pow10(int power) {
 }
 
 inline bool try_add(int128_t a, int128_t b, int128_t* r) {
-    try { *r = a + b; return true; }
-    catch (const std::overflow_error&) { return false; }
+    try {
+        *r = a + b;
+        return true;
+    } catch (const std::overflow_error&) {
+        return false;
+    }
 }
 inline bool try_sub(int128_t a, int128_t b, int128_t* r) {
-    try { *r = a - b; return true; }
-    catch (const std::overflow_error&) { return false; }
+    try {
+        *r = a - b;
+        return true;
+    } catch (const std::overflow_error&) {
+        return false;
+    }
 }
 inline bool try_mul(int128_t a, int128_t b, int128_t* r) {
-    try { *r = a * b; return true; }
-    catch (const std::overflow_error&) { return false; }
+    try {
+        *r = a * b;
+        return true;
+    } catch (const std::overflow_error&) {
+        return false;
+    }
 }
 inline bool try_neg(int128_t a, int128_t* r) {
-    try { *r = -a; return true; }
-    catch (const std::overflow_error&) { return false; }
+    try {
+        *r = -a;
+        return true;
+    } catch (const std::overflow_error&) {
+        return false;
+    }
 }
 
-inline int128_t checked_add(int128_t a, int128_t b) { return a + b; }
-inline int128_t checked_sub(int128_t a, int128_t b) { return a - b; }
-inline int128_t checked_mul(int128_t a, int128_t b) { return a * b; }
-inline int128_t checked_neg(int128_t a)             { return -a; }
+inline int128_t checked_add(int128_t a, int128_t b) {
+    return a + b;
+}
+inline int128_t checked_sub(int128_t a, int128_t b) {
+    return a - b;
+}
+inline int128_t checked_mul(int128_t a, int128_t b) {
+    return a * b;
+}
+inline int128_t checked_neg(int128_t a) {
+    return -a;
+}
 
 // |v| via unsigned arithmetic; the (-v-1)+1 trick keeps INT128_MIN safe.
 inline uint128_t unsigned_magnitude(int128_t v) {
-    if (v >= 0) return static_cast<uint128_t>(v);
+    if (v >= 0)
+        return static_cast<uint128_t>(v);
     // For v = INT128_MIN:  -(v+1) = INT128_MAX  (no overflow)
     int128_t abs_minus_one = -(v + 1);
     return static_cast<uint128_t>(abs_minus_one) + 1;
@@ -67,16 +92,17 @@ inline int128_t int128_min() {
 }
 
 // Cross-exponent comparison via cpp_int (arbitrary precision).
-inline int compare_cross(int128_t m1, int8_t e1,
-                         int128_t m2, int8_t e2) {
+inline int compare_cross(int128_t m1, int8_t e1, int128_t m2, int8_t e2) {
     if (e1 == e2) {
-        if (m1 < m2) return -1;
-        if (m1 > m2) return +1;
+        if (m1 < m2)
+            return -1;
+        if (m1 > m2)
+            return +1;
         return 0;
     }
 
     using boost::multiprecision::cpp_int;
-    cpp_int left  = m1;
+    cpp_int left = m1;
     cpp_int right = m2;
     int d = int(e1) - int(e2);
     if (d > 0) {
@@ -85,10 +111,12 @@ inline int compare_cross(int128_t m1, int8_t e1,
         for (int i = 0; i < -d; ++i) left *= 10;
     }
 
-    if (left < right) return -1;
-    if (left > right) return +1;
+    if (left < right)
+        return -1;
+    if (left > right)
+        return +1;
     return 0;
 }
 
-} // namespace detail
-} // namespace fixed128
+}  // namespace detail
+}  // namespace fixed128

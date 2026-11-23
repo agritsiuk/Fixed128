@@ -5,7 +5,7 @@
 #include <limits>
 #include <stdexcept>
 
-using Fixed128     = fixed128::Fixed128<16>;
+using Fixed128 = fixed128::Fixed128<16>;
 using RoundingMode = fixed128::RoundingMode;
 
 // ===========================================================================
@@ -20,11 +20,9 @@ TEST(Fixed128Constructor, StoresMantissaAndExponent) {
 
 TEST(Fixed128Constructor, AcceptsInt64MinAndMax) {
     Fixed128 hi(std::numeric_limits<int64_t>::max(), 0);
-    EXPECT_EQ(static_cast<int64_t>(hi.raw_mantissa()),
-              std::numeric_limits<int64_t>::max());
+    EXPECT_EQ(static_cast<int64_t>(hi.raw_mantissa()), std::numeric_limits<int64_t>::max());
     Fixed128 lo(std::numeric_limits<int64_t>::min(), 0);
-    EXPECT_EQ(static_cast<int64_t>(lo.raw_mantissa()),
-              std::numeric_limits<int64_t>::min());
+    EXPECT_EQ(static_cast<int64_t>(lo.raw_mantissa()), std::numeric_limits<int64_t>::min());
 }
 
 TEST(Fixed128Constructor, FromParts) {
@@ -89,13 +87,13 @@ TEST(Fixed128Increment, PostIncrementReturnsPrevious) {
     Fixed128 v(150000000LL, 8);
     Fixed128 before = v++;
     EXPECT_EQ(static_cast<int64_t>(before.raw_mantissa()), 150000000LL);
-    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()),      250000000LL);
+    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 250000000LL);
 }
 TEST(Fixed128Increment, PostDecrementReturnsPrevious) {
     Fixed128 v(150000000LL, 8);
     Fixed128 before = v--;
     EXPECT_EQ(static_cast<int64_t>(before.raw_mantissa()), 150000000LL);
-    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()),       50000000LL);
+    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 50000000LL);
 }
 TEST(Fixed128Increment, IncrementZero) {
     Fixed128 v(0LL, 0);
@@ -120,58 +118,73 @@ TEST(Fixed128Increment, IncrementNegativeExponent) {
 
 TEST(Fixed128Comparison, EqualSameRepresentation) {
     Fixed128 a(150000000LL, 8), b(150000000LL, 8);
-    EXPECT_TRUE(a == b); EXPECT_FALSE(a != b);
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a != b);
 }
 TEST(Fixed128Comparison, EqualDifferentScales) {
     Fixed128 a(15LL, 1), b(150LL, 2), c(1500LL, 3);
-    EXPECT_TRUE(a == b); EXPECT_TRUE(b == c); EXPECT_TRUE(a == c);
+    EXPECT_TRUE(a == b);
+    EXPECT_TRUE(b == c);
+    EXPECT_TRUE(a == c);
 }
 TEST(Fixed128Comparison, EqualIntegerAndDecimal) {
     Fixed128 a(1LL, 0), b(10LL, 1), c(100LL, 2);
-    EXPECT_TRUE(a == b); EXPECT_TRUE(b == c);
+    EXPECT_TRUE(a == b);
+    EXPECT_TRUE(b == c);
 }
 TEST(Fixed128Comparison, NotEqual) {
     Fixed128 a(15LL, 1), b(16LL, 1);
-    EXPECT_TRUE(a != b); EXPECT_FALSE(a == b);
+    EXPECT_TRUE(a != b);
+    EXPECT_FALSE(a == b);
 }
 TEST(Fixed128Comparison, LessAndGreaterSameExponent) {
     Fixed128 small(140000000LL, 8), large(150000000LL, 8);
-    EXPECT_TRUE(small < large); EXPECT_TRUE(small <= large);
-    EXPECT_TRUE(large > small); EXPECT_TRUE(large >= small);
-    EXPECT_FALSE(large < small); EXPECT_FALSE(small > large);
+    EXPECT_TRUE(small < large);
+    EXPECT_TRUE(small <= large);
+    EXPECT_TRUE(large > small);
+    EXPECT_TRUE(large >= small);
+    EXPECT_FALSE(large < small);
+    EXPECT_FALSE(small > large);
 }
 TEST(Fixed128Comparison, LessAndGreaterDifferentExponent) {
     Fixed128 small(1LL, 0), large(15LL, 1);
-    EXPECT_TRUE(small < large); EXPECT_TRUE(large > small);
+    EXPECT_TRUE(small < large);
+    EXPECT_TRUE(large > small);
 }
 TEST(Fixed128Comparison, NegativeValues) {
-    Fixed128 neg( -150000000LL, 8), pos( 150000000LL, 8), zero(0LL, 8);
-    EXPECT_TRUE(neg < pos); EXPECT_TRUE(neg < zero);
-    EXPECT_TRUE(pos > zero); EXPECT_TRUE(zero > neg);
+    Fixed128 neg(-150000000LL, 8), pos(150000000LL, 8), zero(0LL, 8);
+    EXPECT_TRUE(neg < pos);
+    EXPECT_TRUE(neg < zero);
+    EXPECT_TRUE(pos > zero);
+    EXPECT_TRUE(zero > neg);
 }
 TEST(Fixed128Comparison, ZeroAcrossExponents) {
     Fixed128 z1(0LL, 0), z2(0LL, 8), z3(0LL, -5);
-    EXPECT_TRUE(z1 == z2); EXPECT_TRUE(z2 == z3);
+    EXPECT_TRUE(z1 == z2);
+    EXPECT_TRUE(z2 == z3);
 }
 TEST(Fixed128Comparison, DifferentSignWithDifferentScales) {
     Fixed128 neg(-1LL, 0), pos(10LL, 1);
-    EXPECT_TRUE(neg < pos); EXPECT_TRUE(pos > neg);
+    EXPECT_TRUE(neg < pos);
+    EXPECT_TRUE(pos > neg);
 }
 TEST(Fixed128Comparison, PositiveAndNegativeExponents) {
     Fixed128 a(100LL, 0), b(1LL, -1), c(10LL, -1);
-    EXPECT_TRUE(b < a); EXPECT_TRUE(a == c);
+    EXPECT_TRUE(b < a);
+    EXPECT_TRUE(a == c);
 }
 TEST(Fixed128Comparison, HugeExponentGap) {
     Fixed128 tiny(1LL, 127), huge(1LL, -128);
-    EXPECT_TRUE(tiny < huge); EXPECT_TRUE(huge > tiny);
+    EXPECT_TRUE(tiny < huge);
+    EXPECT_TRUE(huge > tiny);
 }
 TEST(Fixed128Comparison, EqualToInt64) {
-    Fixed128 a(150000000LL, 8);   // 1.5
+    Fixed128 a(150000000LL, 8);  // 1.5
     EXPECT_FALSE(a == 1LL);
-    EXPECT_TRUE (a != 1LL);
-    Fixed128 b(1LL, 0);           // 1
-    EXPECT_TRUE (b == 1LL);
-    EXPECT_TRUE (1LL == b);
+    EXPECT_TRUE(a != 1LL);
+    Fixed128 b(1LL, 0);  // 1
+    EXPECT_TRUE(b == 1LL);
+    EXPECT_TRUE(1LL == b);
     EXPECT_FALSE(b != 1LL);
 }
 
@@ -216,7 +229,7 @@ TEST(Fixed128Subtraction, DifferentExponents) {
 }
 TEST(Fixed128Subtraction, OverflowThrows) {
     Fixed128 big(std::numeric_limits<int64_t>::min(), 0);
-    Fixed128 sq  = big * big;
+    Fixed128 sq = big * big;
     Fixed128 neg = Fixed128(0LL, 0) - sq;
     EXPECT_THROW((void)(sq - neg), std::overflow_error);
 }
@@ -228,18 +241,15 @@ TEST(Fixed128Subtraction, OverflowThrows) {
 TEST(Fixed128Multiplication, BasicProduct) {
     Fixed128 p = Fixed128(150000000LL, 8) * Fixed128(200000000LL, 8);
     EXPECT_EQ(p.raw_exponent(), 16);
-    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()),
-              30000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()), 30000000000000000LL);
 }
 TEST(Fixed128Multiplication, NegativeProduct) {
     Fixed128 p = Fixed128(-150000000LL, 8) * Fixed128(200000000LL, 8);
-    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()),
-              -30000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()), -30000000000000000LL);
 }
 TEST(Fixed128Multiplication, BothNegative) {
     Fixed128 p = Fixed128(-150000000LL, 8) * Fixed128(-200000000LL, 8);
-    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()),
-              30000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()), 30000000000000000LL);
 }
 TEST(Fixed128Multiplication, OverflowThrows) {
     Fixed128 big(std::numeric_limits<int64_t>::max(), 0);
@@ -283,12 +293,10 @@ TEST(Fixed128Division, MultiplyThenDivide) {
     Fixed128 x(150000000LL, 8), y(200000000LL, 8), z(300000000LL, 8);
     Fixed128 r = (x * y) / z;
     EXPECT_EQ(r.raw_exponent(), 16);
-    EXPECT_EQ(static_cast<int64_t>(r.raw_mantissa()),
-              10000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(r.raw_mantissa()), 10000000000000000LL);
 }
 TEST(Fixed128Division, DivideAtExplicitTarget) {
-    Fixed128 q = Fixed128(100000000LL, 8).divide_at(
-        Fixed128(300000000LL, 8), 16);
+    Fixed128 q = Fixed128(100000000LL, 8).divide_at(Fixed128(300000000LL, 8), 16);
     EXPECT_EQ(q.raw_exponent(), 16);
     EXPECT_EQ(static_cast<int64_t>(q.raw_mantissa()), 3333333333333333LL);
 }
@@ -300,8 +308,7 @@ TEST(Fixed128Division, DivisionByZeroThrows) {
 TEST(Fixed128Division, NegativeTruncatesTowardZero) {
     Fixed128 q = Fixed128(-100LL, 0) / Fixed128(3LL, 0);
     EXPECT_EQ(q.raw_exponent(), 16);
-    EXPECT_EQ(static_cast<int64_t>(q.raw_mantissa()),
-              -333333333333333333LL);
+    EXPECT_EQ(static_cast<int64_t>(q.raw_mantissa()), -333333333333333333LL);
 }
 TEST(Fixed128Division, LargeNegativeShiftReturnsZero) {
     // divide_at(target=-127) forces scaling_shift = -127 - ea + eb.
@@ -327,23 +334,19 @@ TEST(Fixed128MaxPrecision, MultiplicationNotCappedBelow) {
     fixed128::Fixed128<24> a(150000000LL, 8), b(200000000LL, 8);
     auto p = a * b;
     EXPECT_EQ(p.raw_exponent(), 16);
-    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()),
-              30000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(p.raw_mantissa()), 30000000000000000LL);
 }
 TEST(Fixed128MaxPrecision, MultiplyThenDivideScenarioCap8) {
-    fixed128::Fixed128<8> x(150000000LL, 8), y(200000000LL, 8),
-                          z(300000000LL, 8);
+    fixed128::Fixed128<8> x(150000000LL, 8), y(200000000LL, 8), z(300000000LL, 8);
     auto r = (x * y) / z;
     EXPECT_EQ(r.raw_exponent(), 8);
     EXPECT_EQ(static_cast<int64_t>(r.raw_mantissa()), 100000000LL);
 }
 TEST(Fixed128MaxPrecision, MultiplyThenDivideScenarioCap16) {
-    fixed128::Fixed128<16> x(150000000LL, 8), y(200000000LL, 8),
-                           z(300000000LL, 8);
+    fixed128::Fixed128<16> x(150000000LL, 8), y(200000000LL, 8), z(300000000LL, 8);
     auto r = (x * y) / z;
     EXPECT_EQ(r.raw_exponent(), 16);
-    EXPECT_EQ(static_cast<int64_t>(r.raw_mantissa()),
-              10000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(r.raw_mantissa()), 10000000000000000LL);
 }
 
 // ===========================================================================
@@ -371,38 +374,26 @@ TEST(Fixed128Rescale, ZeroToLargeExponentNoThrow) {
 // ===========================================================================
 
 TEST(Fixed128Rounding, TruncateTowardZero) {
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(159, 2).rescale(1, RoundingMode::Truncate).raw_mantissa()), 15);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(-159, 2).rescale(1, RoundingMode::Truncate).raw_mantissa()), -15);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(159, 2).rescale(1, RoundingMode::Truncate).raw_mantissa()), 15);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(-159, 2).rescale(1, RoundingMode::Truncate).raw_mantissa()), -15);
 }
 TEST(Fixed128Rounding, FloorPositiveAndNegative) {
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(159, 2).rescale(1, RoundingMode::Floor).raw_mantissa()), 15);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(-159, 2).rescale(1, RoundingMode::Floor).raw_mantissa()), -16);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(159, 2).rescale(1, RoundingMode::Floor).raw_mantissa()), 15);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(-159, 2).rescale(1, RoundingMode::Floor).raw_mantissa()), -16);
 }
 TEST(Fixed128Rounding, CeilingPositiveAndNegative) {
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(151, 2).rescale(1, RoundingMode::Ceiling).raw_mantissa()), 16);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(-151, 2).rescale(1, RoundingMode::Ceiling).raw_mantissa()), -15);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(151, 2).rescale(1, RoundingMode::Ceiling).raw_mantissa()), 16);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(-151, 2).rescale(1, RoundingMode::Ceiling).raw_mantissa()), -15);
 }
 TEST(Fixed128Rounding, HalfUpAwayFromZero) {
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(155, 2).rescale(1, RoundingMode::HalfUp).raw_mantissa()), 16);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(-155, 2).rescale(1, RoundingMode::HalfUp).raw_mantissa()), -16);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(155, 2).rescale(1, RoundingMode::HalfUp).raw_mantissa()), 16);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(-155, 2).rescale(1, RoundingMode::HalfUp).raw_mantissa()), -16);
 }
 TEST(Fixed128Rounding, HalfEvenTiesToEven) {
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128( 250, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()),  2);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128( 350, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()),  4);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(-250, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()), -2);
-    EXPECT_EQ(static_cast<int64_t>(
-        Fixed128(-350, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()), -4);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(250, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()), 2);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(350, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()), 4);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(-250, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()), -2);
+    EXPECT_EQ(static_cast<int64_t>(Fixed128(-350, 2).rescale(0, RoundingMode::HalfEven).raw_mantissa()), -4);
 }
 
 // ===========================================================================
@@ -430,28 +421,26 @@ TEST(Fixed128CompoundAssign, PlusEquals) {
     EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 400000000LL);
 }
 TEST(Fixed128CompoundAssign, PlusEqualsInt64) {
-    Fixed128 v(150000000LL, 8);   // 1.5
-    v += 2;                       // +2 → 3.5
+    Fixed128 v(150000000LL, 8);  // 1.5
+    v += 2;                      // +2 → 3.5
     EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 350000000LL);
     EXPECT_EQ(v.raw_exponent(), 8);
 }
 TEST(Fixed128CompoundAssign, MinusEqualsInt64) {
-    Fixed128 v(150000000LL, 8);   // 1.5
-    v -= 1;                       // −1 → 0.5
+    Fixed128 v(150000000LL, 8);  // 1.5
+    v -= 1;                      // −1 → 0.5
     EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 50000000LL);
 }
 TEST(Fixed128CompoundAssign, TimesEqualsChangesExponent) {
     Fixed128 v(150000000LL, 8);
     v *= Fixed128(200000000LL, 8);
-    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()),
-              30000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 30000000000000000LL);
     EXPECT_EQ(v.raw_exponent(), 16);
 }
 TEST(Fixed128CompoundAssign, DivideEqualsTargetsMaxPrecision) {
     Fixed128 v(30000000000000000LL, 16);
     v /= Fixed128(300000000LL, 8);
-    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()),
-              10000000000000000LL);
+    EXPECT_EQ(static_cast<int64_t>(v.raw_mantissa()), 10000000000000000LL);
     EXPECT_EQ(v.raw_exponent(), 16);
 }
 
@@ -483,8 +472,7 @@ TEST(Fixed128Finance, CompoundInterest) {
     Fixed128 hundred(10000000000LL, 8);
     Fixed128 interest = (principal * rate) / hundred;
     EXPECT_EQ(interest.raw_exponent(), 16);
-    EXPECT_EQ(static_cast<int64_t>(interest.raw_mantissa()),
-              6790123395676500000LL);
+    EXPECT_EQ(static_cast<int64_t>(interest.raw_mantissa()), 6790123395676500000LL);
 }
 TEST(Fixed128Finance, BankersRoundingRealistic) {
     Fixed128 v(234500, 5);

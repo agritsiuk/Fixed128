@@ -36,3 +36,12 @@ install(EXPORT fixed128Targets
     FILE fixed128Targets.cmake
     NAMESPACE fixed128::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fixed128)
+
+foreach(folder IN ITEMS include tests)
+  foreach(extension IN ITEMS hpp h cpp c cc)
+    list(APPEND GLOB_EXPRESSIONS "${folder}/*.${extension}")
+  endforeach()
+endforeach()
+
+file(GLOB_RECURSE ALL_SOURCES ${GLOB_EXPRESSIONS})
+add_custom_target(format COMMAND clang-format -i ${ALL_SOURCES})

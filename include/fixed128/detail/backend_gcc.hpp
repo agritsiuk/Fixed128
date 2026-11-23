@@ -22,7 +22,7 @@
 namespace fixed128 {
 namespace detail {
 
-using int128_t  = __int128;
+using int128_t = __int128;
 using uint128_t = unsigned __int128;
 
 constexpr int kMaxPower10 = 38;
@@ -76,7 +76,8 @@ inline int128_t checked_neg(int128_t a) {
 
 // |v| via unsigned arithmetic (safe for INT128_MIN).
 inline uint128_t unsigned_magnitude(int128_t v) {
-    if (v < 0) return uint128_t(0) - static_cast<uint128_t>(v);
+    if (v < 0)
+        return uint128_t(0) - static_cast<uint128_t>(v);
     return static_cast<uint128_t>(v);
 }
 
@@ -87,17 +88,18 @@ inline int128_t int128_min() {
 
 // Cross-exponent comparison: sign(m1/10^e1 - m2/10^e2).
 // Uses overflow-detecting multiplication; falls back to sign reasoning.
-inline int compare_cross(int128_t m1, int8_t e1,
-                         int128_t m2, int8_t e2) {
+inline int compare_cross(int128_t m1, int8_t e1, int128_t m2, int8_t e2) {
     if (e1 == e2) {
-        if (m1 < m2) return -1;
-        if (m1 > m2) return +1;
+        if (m1 < m2)
+            return -1;
+        if (m1 > m2)
+            return +1;
         return 0;
     }
 
     int128_t X = m1;
     int128_t Y = m2;
-    int  d = int(e1) - int(e2);
+    int d = int(e1) - int(e2);
     bool invert = false;
     if (e1 < e2) {
         std::swap(X, Y);
@@ -125,5 +127,5 @@ inline int compare_cross(int128_t m1, int8_t e1,
     return invert ? -r : r;
 }
 
-} // namespace detail
-} // namespace fixed128
+}  // namespace detail
+}  // namespace fixed128
