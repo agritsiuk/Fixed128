@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(Fixed128 VERSION 1.7.0 LANGUAGES CXX)
+project(Fixed128 VERSION 2.0.0 LANGUAGES CXX)
 
 add_library(fixed128 INTERFACE)
 target_include_directories(fixed128 INTERFACE
@@ -18,9 +18,15 @@ check_cxx_source_compiles("
     }
 " FIXED128_HAS_NATIVE_INT128)
 
-if(NOT FIXED128_HAS_NATIVE_INT128)
-    find_package(Boost REQUIRED)
-    target_include_directories(fixed128 INTERFACE ${Boost_INCLUDE_DIRS})
+option(FIXED128_FORCE_LITE_BACKEND
+       "Force lite backend even when __int128 is available" OFF)
+
+if(FIXED128_FORCE_LITE_BACKEND)
+    message(STATUS "Fixed128: lite backend forced by user")
+elseif(FIXED128_HAS_NATIVE_INT128)
+    message(STATUS "Fixed128: full backend (native __int128)")
+else()
+    message(STATUS "Fixed128: lite backend (no __int128, e.g. MSVC)")
 endif()
 
 option(FIXED128_BUILD_TESTS "Build Fixed128 tests" ON)
@@ -36,12 +42,3 @@ install(EXPORT fixed128Targets
     FILE fixed128Targets.cmake
     NAMESPACE fixed128::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fixed128)
-
-foreach(folder IN ITEMS include tests)
-  foreach(extension IN ITEMS hpp h cpp c cc)
-    list(APPEND GLOB_EXPRESSIONS "${folder}/*.${extension}")
-  endforeach()
-endforeach()
-
-file(GLOB_RECURSE ALL_SOURCES ${GLOB_EXPRESSIONS})
-add_custom_target(format COMMAND clang-format -i ${ALL_SOURCES})
